@@ -8,7 +8,22 @@ immersion lithography systems.
 import tensorflow as tf
 import numpy as np
 from typing import Tuple, Optional, Dict, Any
-from tensorflow_torchoptics import Field, PlanarGrid, Lens
+import sys
+import os
+
+# Add the parent directory to the path to import tensorflow_torchoptics
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+# Import from tensorflow_torchoptics
+try:
+    from tensorflow_torchoptics import Field, PlanarGrid, Lens
+    from tensorflow_torchoptics.functional import meshgrid2d
+except ImportError:
+    # If direct import fails, try importing from the local directory
+    import tensorflow_torchoptics
+    from tensorflow_torchoptics import Field, PlanarGrid, Lens
+    from tensorflow_torchoptics.functional import meshgrid2d
+
 from tensorflow_torchoptics.profiles import circle
 
 
@@ -59,6 +74,9 @@ class LithographySystem:
         # Create the projection lens
         self.lens = self._create_projection_lens()
         
+        # Ensure lens z value is consistent with expected type
+        self.lens._z = tf.cast(self.lens._z, tf.float32)
+        
     def _create_projection_lens(self) -> Lens:
         """Create the projection lens with specified NA."""
         # Calculate focal length based on NA and physical constraints
@@ -87,20 +105,30 @@ class LithographySystem:
             2D tensor representing the aerial image intensity
         """
         # Create an input field with the mask pattern
+        # Create a field with the mask pattern as the data
         input_field = Field(
-            grid=self.grid,
+            data=mask_pattern,
             wavelength=self.effective_wavelength,
-            z=focus_offset
+            z=tf.cast(focus_offset, tf.float32),
+            spacing=self.grid.spacing,
+            offset=self.grid.offset
         )
         
-        # Apply the mask pattern to the input field
-        masked_field = input_field * mask_pattern
+        # Create a new field with the correct z value to match the lens
+        # Use 0.0 as the default z value to ensure consistency with lens
+        corrected_input_field = Field(
+            data=input_field.data,
+            wavelength=input_field.wavelength,
+            z=tf.constant(0.0, dtype=tf.float32),
+            spacing=input_field.spacing,
+            offset=input_field.offset
+        )
         
         # Propagate through the optical system (lens)
-        output_field = self.lens(masked_field)
+        output_field = self.lens(corrected_input_field)
         
         # Calculate the intensity of the output field
-        aerial_image_intensity = tf.abs(output_field.u) ** 2
+        aerial_image_intensity = tf.abs(output_field.data) ** 2
         
         return aerial_image_intensity
     
@@ -200,3 +228,39 @@ def calculate_image_log_sigmoid_gamma(
     resist_response = tf.nn.sigmoid(gamma * (normalized_image - 0.5)) 
     
     return resist_response
+
+
+def simulate_aerial_image(mask, illumination, optics, resist_thickness=0.1e-6):
+    """
+    Simplified function to simulate aerial image for data generation.
+    
+    Args:
+        mask: 2D numpy array representing the mask pattern
+        illumination: Illumination source object
+        optics: Optical system object
+        resist_thickness: Thickness of the resist layer
+        
+    Returns:
+        2D numpy array representing the simulated aerial image
+    """
+    # Convert numpy mask to tensorflow tensor
+    mask_tensor = tf.constant(mask, dtype=tf.complex64)
+    
+    # Create a lithography system with the given parameters
+    system = LithographySystem(
+        na=optics.na,
+        wavelength=optics.wavelength,
+        resolution=mask.shape[0],
+        mask_size=mask.shape[0] * optics.resolution  # Physical size based on optical system resolution
+    )
+    
+    # Simulate the aerial image
+    aerial_image = system.simulate_aerial_image(mask_tensor)
+    
+    # Convert back to numpy array
+    aerial_image_np = tf.cast(tf.squeeze(aerial_image), tf.float32).numpy()
+    
+    # Ensure values are positive
+    aerial_image_np = np.abs(aerial_image_np)
+    
+    return aerial_image_np

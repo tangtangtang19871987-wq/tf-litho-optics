@@ -269,6 +269,63 @@ class VectorialImagingModel:
             return scalar_psf
 
 
+class OpticalSystem:
+    """Simplified optical system class for data generation purposes."""
+    
+    def __init__(
+        self,
+        wavelength: float = 193e-9,  # DUV wavelength in meters
+        na: float = 1.35,  # Numerical aperture
+        resolution: float = 8e-9  # Resolution in meters
+    ):
+        """
+        Initialize the optical system.
+        
+        Args:
+            wavelength: Exposure wavelength in meters (193nm)
+            na: Numerical aperture of the projection lens
+            resolution: Resolution of the simulation in meters per pixel
+        """
+        self.wavelength = wavelength
+        self.na = na
+        self.resolution = resolution
+        
+    def calculate_coherent_transfer_function(self, shape):
+        """Calculate the coherent transfer function of the optical system."""
+        h, w = shape
+        
+        # Create coordinate grids
+        y, x = tf.meshgrid(
+            tf.range(h, dtype=tf.float32), 
+            tf.range(w, dtype=tf.float32), 
+            indexing='ij'
+        )
+        
+        # Center the coordinates
+        center_y, center_x = h / 2.0, w / 2.0
+        y = y - center_y
+        x = x - center_x
+        
+        # Convert to spatial frequency units
+        # Scale coordinates according to pixel resolution and wavelength
+        scale_factor = self.resolution / (self.wavelength / 1.44)  # Scale relative to lambda in immersion
+        fx = x * scale_factor
+        fy = y * scale_factor
+        
+        # Calculate radial frequency
+        rho = tf.sqrt(fx**2 + fy**2)
+        
+        # Create circular pupil (frequency cutoff based on NA)
+        cutoff_freq = self.na / (self.wavelength / 1.44)  # NA divided by lambda in immersion
+        # Normalize by the maximum frequency that can be represented
+        max_freq = 0.5 / self.resolution  # Nyquist frequency
+        normalized_cutoff = cutoff_freq / max_freq
+        
+        ctf = tf.cast(rho <= normalized_cutoff, tf.complex64)
+        
+        return ctf
+
+
 def calculate_tcc_matrix(
     illumination: IlluminationSource,
     projection_lens: ProjectionLens,

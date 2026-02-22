@@ -432,8 +432,16 @@ class MLSynthesizer:
         Returns:
             Synthesized mask
         """
-        # Preprocess the input
-        input_pattern = self.preprocess_target(target_pattern)
+        # Add channel dimension if needed
+        if len(target_pattern.shape) == 2:
+            # Add batch and channel dimensions: (height, width) -> (1, height, width, 1)
+            input_pattern = target_pattern[np.newaxis, ..., np.newaxis]
+        elif len(target_pattern.shape) == 3:
+            # Add batch dimension: (height, width, channels) -> (1, height, width, channels)
+            input_pattern = target_pattern[np.newaxis, ...]
+        else:
+            # Assume it already has batch dimension
+            input_pattern = target_pattern
         
         # Run inference
         output = self.model(input_pattern, training=False)
@@ -488,10 +496,17 @@ class HybridOptimization:
         # Step 1: Get initial prediction from ML model
         initial_mask = self.ml_synthesizer.predict(target_pattern)
         
+        # Remove channel dimension if present (ML model adds a channel dim)
+        if len(initial_mask.shape) == 3 and initial_mask.shape[-1] == 1:
+            initial_mask = initial_mask.squeeze(-1)  # Remove channel dimension
+        elif len(initial_mask.shape) == 4 and initial_mask.shape[-1] == 1:
+            initial_mask = initial_mask.squeeze(-1)  # Remove channel dimension
+        
         # Convert to complex tensor for physics simulation
         initial_mask_tensor = tf.cast(initial_mask, tf.complex64)
         
         # Step 2: Physics-based refinement using gradient descent
+        # Convert to complex tensor for physics simulation
         refined_mask = tf.Variable(initial_mask_tensor, dtype=tf.complex64)
         
         refinement_history = []
@@ -519,8 +534,8 @@ class HybridOptimization:
             # Constrain magnitude to be binary-like
             magnitude = tf.nn.sigmoid(10.0 * (magnitude - 0.5))
             
-            # Reconstruct complex mask
-            refined_mask.assign(magnitude * tf.exp(tf.complex(tf.zeros_like(phase), phase)))
+            # Reconstruct complex mask using tf.complex
+            refined_mask.assign(tf.complex(magnitude * tf.cos(phase), magnitude * tf.sin(phase)))
             
             # Record loss
             refinement_history.append({

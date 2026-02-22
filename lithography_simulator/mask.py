@@ -223,3 +223,87 @@ def mask_fracture(mask_pattern: np.ndarray, max_shape_size: int = 100) -> list:
             fractured_shapes.append(coords_array)
     
     return fractured_shapes
+
+
+def generate_random_mask(shape, resolution, feature_size, pattern_type='random'):
+    """
+    Generate a random mask pattern.
+    
+    Args:
+        shape: Shape of the mask (height, width)
+        resolution: Resolution of the mask in meters per pixel
+        feature_size: Characteristic feature size in meters
+        pattern_type: Type of pattern to generate ('random', 'lines', 'contact_holes', 'metal_layer')
+        
+    Returns:
+        numpy.ndarray: Generated mask pattern with values between 0 and 1
+    """
+    height, width = shape
+    
+    if pattern_type == 'metal_layer':
+        # Generate a pattern resembling a metal layer with lines and contacts
+        # Determine how many features of the given size fit in our mask
+        feature_pixels = int(feature_size / resolution)
+        
+        # Start with a base pattern
+        mask = np.zeros((height, width), dtype=np.float32)
+        
+        # Add horizontal and vertical lines
+        num_lines_h = height // (feature_pixels * 2)
+        num_lines_v = width // (feature_pixels * 2)
+        
+        for i in range(num_lines_h):
+            start_row = i * 2 * feature_pixels
+            end_row = min(start_row + feature_pixels, height)
+            mask[start_row:end_row, :] = 1.0
+            
+        for j in range(num_lines_v):
+            start_col = j * 2 * feature_pixels
+            end_col = min(start_col + feature_pixels, width)
+            mask[:, start_col:end_col] = 1.0
+        
+        # Add some contact holes/pads
+        num_contacts = min(20, (height * width) // (feature_pixels * feature_pixels))
+        for _ in range(num_contacts):
+            center_y = np.random.randint(feature_pixels, height - feature_pixels)
+            center_x = np.random.randint(feature_pixels, width - feature_pixels)
+            
+            # Draw a circle for the contact pad
+            y, x = np.ogrid[:height, :width]
+            mask_area = (x - center_x)**2 + (y - center_y)**2 <= feature_pixels**2
+            mask[mask_area] = 1.0
+    
+    elif pattern_type == 'lines':
+        # Generate parallel lines
+        line_width = max(1, int(feature_size / resolution))
+        pitch = max(line_width + 1, int(2 * feature_size / resolution))
+        
+        mask = np.zeros((height, width), dtype=np.float32)
+        
+        # Horizontal lines
+        for i in range(0, height, pitch):
+            mask[i:i+line_width, :] = 1.0
+    
+    elif pattern_type == 'contact_holes':
+        # Generate circular contact holes
+        feature_radius = max(1, int(feature_size / resolution / 2))
+        mask = np.ones((height, width), dtype=np.float32)
+        
+        # Place random circles (contact holes)
+        num_circles = min(50, (height * width) // (feature_radius * feature_radius * 4))
+        for _ in range(num_circles):
+            center_y = np.random.randint(feature_radius, height - feature_radius)
+            center_x = np.random.randint(feature_radius, width - feature_radius)
+            
+            y, x = np.ogrid[:height, :width]
+            hole_area = (x - center_x)**2 + (y - center_y)**2 <= feature_radius**2
+            mask[hole_area] = 0.0
+    
+    else:  # 'random' or default
+        mask = np.random.rand(height, width).astype(np.float32)
+        
+        # Apply threshold to create binary patterns
+        threshold = 0.5
+        mask = np.where(mask > threshold, 1.0, 0.0)
+    
+    return mask

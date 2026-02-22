@@ -56,7 +56,9 @@ class MBOPC:
             # Create an initial mask based on the target pattern
             initial_mask = BinaryMask(target_pattern.shape)
             # Use a simple threshold of the target pattern
-            binary_target = tf.cast(tf.greater(target_pattern, 0.5), tf.complex64)
+            # For complex tensors, compare the magnitude
+            binary_target_real = tf.cast(tf.greater(tf.abs(target_pattern), 0.5), tf.float32)
+            binary_target = tf.cast(binary_target_real, tf.complex64)
             initial_mask.set_pattern(binary_target)
         
         self.mask = initial_mask
@@ -85,13 +87,16 @@ class MBOPC:
         image_fidelity = tf.reduce_mean(tf.square(predicted_image - target_image))
         
         # Regularization terms to ensure mask manufacturability
+        # Extract real part of mask for regularization calculations
+        mask_real = tf.math.real(mask_pattern)
+        
         # 1. Mask complexity regularization (penalize rapid changes)
-        mask_diff_x = mask_pattern[:, 1:] - mask_pattern[:, :-1]
-        mask_diff_y = mask_pattern[1:, :] - mask_pattern[:-1, :]
+        mask_diff_x = mask_real[:, 1:] - mask_real[:, :-1]
+        mask_diff_y = mask_real[1:, :] - mask_real[:-1, :]
         mask_complexity = tf.reduce_mean(tf.square(mask_diff_x)) + tf.reduce_mean(tf.square(mask_diff_y))
         
         # 2. Mask value regularization (encourage binary values)
-        mask_binary_penalty = tf.reduce_mean(tf.square(mask_pattern * (1 - mask_pattern)))
+        mask_binary_penalty = tf.reduce_mean(tf.square(mask_real * (1 - mask_real)))
         
         # Total cost
         total_cost = image_fidelity + regularization_weight * (mask_complexity + mask_binary_penalty)
@@ -134,7 +139,10 @@ class MBOPC:
         magnitude = tf.clip_by_value(magnitude, 0.0, 1.0)
         
         # Reconstruct complex pattern
-        new_pattern = magnitude * tf.exp(tf.complex(tf.zeros_like(phase), phase))
+        # Use tf.cos and tf.sin to build the complex exponential
+        real_part = magnitude * tf.cos(phase)
+        imag_part = magnitude * tf.sin(phase)
+        new_pattern = tf.complex(real_part, imag_part)
         
         # Update the mask
         self.mask.set_pattern(new_pattern)
@@ -304,7 +312,8 @@ class ProcessWindowOptimizer:
                 aerial_image = aerial_image * dose
                 
                 # Calculate fidelity cost
-                fidelity_cost = tf.reduce_mean(tf.square(aerial_image - target_pattern))
+                # Take the absolute value of target pattern to match the real-valued aerial image
+                fidelity_cost = tf.reduce_mean(tf.square(aerial_image - tf.abs(target_pattern)))
                 costs.append(fidelity_cost)
         
         # Return mean cost across process window

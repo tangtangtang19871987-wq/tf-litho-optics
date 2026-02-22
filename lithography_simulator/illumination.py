@@ -76,7 +76,7 @@ class PartialCoherentSource(IlluminationSource):
         x = x - center_x
         
         # Normalize coordinates to unit circle
-        rho = tf.sqrt(x**2 + y**2) / tf.reduce_max([h, w]) * 2
+        rho = tf.sqrt(x**2 + y**2) / tf.cast(tf.reduce_max([h, w]), tf.float32) * 2
         
         if self.source_type == 'annular':
             # Annular illumination: ring-shaped source
@@ -231,7 +231,7 @@ def create_illumination(
             shape, 
             kwargs.get('sigma', 0.5),
             kwargs.get('wavelength', 193e-9),
-            kwargs.get('source_type', 'annular')
+            kwargs.get('internal_source_type', 'annular')
         )
     elif source_type == 'vectorial':
         return VectorialPolarizationSource(

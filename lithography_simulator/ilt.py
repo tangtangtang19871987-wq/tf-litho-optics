@@ -64,7 +64,9 @@ class ILT:
             # Create an initial mask based on the target pattern
             initial_mask = BinaryMask(target_pattern.shape)
             # Use a simple threshold of the target pattern
-            binary_target = tf.cast(tf.greater(target_pattern, 0.5), tf.complex64)
+            # For complex tensors, compare the magnitude
+            binary_target_real = tf.cast(tf.greater(tf.abs(target_pattern), 0.5), tf.float32)
+            binary_target = tf.cast(binary_target_real, tf.complex64)
             initial_mask.set_pattern(binary_target)
         
         self.mask = initial_mask
@@ -326,7 +328,9 @@ class SourceMaskOptimization:
         # Initialize mask
         if initial_mask is None:
             initial_mask = BinaryMask(target_pattern.shape)
-            binary_target = tf.cast(tf.greater(target_pattern, 0.5), tf.complex64)
+            # For complex tensors, compare the magnitude
+            binary_target_real = tf.cast(tf.greater(tf.abs(target_pattern), 0.5), tf.float32)
+            binary_target = tf.cast(binary_target_real, tf.complex64)
             initial_mask.set_pattern(binary_target)
         
         self.mask = initial_mask

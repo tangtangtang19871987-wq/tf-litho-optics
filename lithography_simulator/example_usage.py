@@ -30,9 +30,8 @@ def main():
         wavelength=193e-9,  # 193 nm wavelength
         na=1.35,           # Numerical aperture
         n_immersion=1.44,  # Refractive index of immersion fluid
-        image_scaling=4.0,  # 4x reduction
-        shape=(128, 128),   # Simulation grid size
-        resist_threshold=0.5  # Resist threshold
+        resolution=128,    # Resolution of the simulation grid
+        mask_size=10e-6    # Physical size of the mask area in meters
     )
     
     # 2. Create an illumination source
@@ -41,7 +40,7 @@ def main():
         shape=(128, 128),
         source_type='partial_coherent',
         sigma=0.7,
-        source_type='annular'
+        internal_source_type='annular'
     )
     
     # 3. Create a target pattern (line-space pattern)
@@ -58,10 +57,14 @@ def main():
     
     # 5. Apply Model-Based OPC (MBOPC)
     print("\n5. Applying Model-Based OPC...")
+    # Convert target pattern to complex and take the intensity for comparison
+    target_complex = tf.constant(target_pattern, dtype=tf.complex64)
+    target_intensity = tf.abs(target_complex)  # Use the magnitude as the target intensity
+    
     mbopc_optimizer = MBOPC(
         lithography_system=lithography_system,
         illumination=illumination,
-        target_pattern=tf.constant(target_pattern, dtype=tf.complex64),
+        target_pattern=target_intensity,  # Use intensity instead of complex values
         learning_rate=0.01,
         max_iterations=50,
         regularization_weight=0.01
@@ -74,7 +77,7 @@ def main():
     ilt_optimizer = ILT(
         lithography_system=lithography_system,
         illumination=illumination,
-        target_pattern=tf.constant(target_pattern, dtype=tf.complex64),
+        target_pattern=target_intensity,  # Use intensity instead of complex values, same as MBOPC
         learning_rate=0.01,
         max_iterations=50,
         regularization_weights={
@@ -89,8 +92,9 @@ def main():
     # 7. Apply Machine Learning-based optimization
     print("\n7. Applying Machine Learning-based optimization...")
     # Create synthetic training data for demonstration
-    training_targets = np.stack([target_pattern] * 10)
-    training_masks = np.stack([target_pattern] * 10)  # In reality, this would be corrected masks
+    # Reshape to add channel dimension: (batch, height, width, channels)
+    training_targets = np.expand_dims(np.stack([target_pattern] * 10), axis=-1)  # Shape: (10, 128, 128, 1)
+    training_masks = np.expand_dims(np.stack([target_pattern] * 10), axis=-1)  # Shape: (10, 128, 128, 1)
     
     ml_synthesizer = MLSynthesizer(
         model_type='unet',
@@ -109,6 +113,14 @@ def main():
     # Predict mask using ML
     predicted_mask_ml = ml_synthesizer.predict(target_pattern)
     
+    # Ensure the predicted mask has the correct shape by removing any extra dimensions
+    if len(predicted_mask_ml.shape) == 3 and predicted_mask_ml.shape[-1] == 1:
+        predicted_mask_ml = predicted_mask_ml.squeeze(-1)
+    elif len(predicted_mask_ml.shape) == 4 and predicted_mask_ml.shape[-1] == 1:
+        predicted_mask_ml = predicted_mask_ml.squeeze(-1)
+    elif len(predicted_mask_ml.shape) == 4:
+        predicted_mask_ml = predicted_mask_ml.squeeze(0)  # Remove batch dimension if it's 4D
+    
     # 8. Apply Hybrid Optimization (ML + Physics)
     print("\n8. Applying Hybrid Optimization (ML + Physics)...")
     hybrid_optimizer = HybridOptimization(
@@ -118,6 +130,7 @@ def main():
         learning_rate=0.001
     )
     
+    # Use the real target pattern for hybrid optimization (neural networks expect real values)
     hybrid_mask, hybrid_history = hybrid_optimizer.predict_and_refine(
         target_pattern, refinement_iterations=10
     )
